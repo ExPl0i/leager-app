@@ -1,4 +1,4 @@
-package com.ledger.app.data
+﻿package com.ledger.app.data
 
 import com.ledger.app.data.repository.AccountRepository
 import com.ledger.app.data.repository.CategoryRepository
@@ -13,8 +13,9 @@ import kotlinx.coroutines.flow.first
 import java.io.InputStream
 import java.time.LocalDate
 import java.time.LocalTime
-import java.time.format.DateTimeParseException
+import java.time.format.DateTimeFormatter
 import java.util.UUID
+import kotlin.math.abs
 
 class CsvImporter(
     private val accountRepo: AccountRepository,
@@ -22,6 +23,31 @@ class CsvImporter(
     private val transactionRepo: TransactionRepository
 ) {
     data class Result(val imported: Int, val skipped: Int, val errors: List<String>)
+
+    // Column name aliases (lowercase)
+    private val dateAliases    = setOf("date", "дата")
+    private val amountAliases  = setOf("amount", "сумма", "sum")
+    private val typeAliases    = setOf("type", "тип")
+    private val accountAliases = setOf("account", "счёт", "счет", "from_account", "from account", "from")
+    private val toAccAliases   = setOf("to_account", "to account", "to", "счёт назначения", "счет назначения", "кому", "куда")
+    private val catAliases     = setOf("category", "категория", "cat")
+    private val noteAliases    = setOf("note", "comment", "комментарий", "заметка", "описание", "notes")
+    private val uidAliases     = setOf("uid", "id", "uuid")
+
+    // Transaction type aliases (lowercase)
+    private val incomeValues   = setOf("income", "доход", "приход", "in", "+")
+    private val expenseValues  = setOf("expense", "расход", "трата", "out", "-")
+    private val transferValues = setOf("transfer", "перевод", "между счетами")
+
+    private val dateFormatters = listOf(
+        DateTimeFormatter.ofPattern("yyyy-MM-dd"),
+        DateTimeFormatter.ofPattern("dd.MM.yyyy"),
+        DateTimeFormatter.ofPattern("dd/MM/yyyy"),
+        DateTimeFormatter.ofPattern("MM/dd/yyyy"),
+        DateTimeFormatter.ofPattern("d.M.yyyy"),
+        DateTimeFormatter.ofPattern("d/M/yyyy"),
+        DateTimeFormatter.ofPattern("yyyy.MM.dd"),
+    )
 
     suspend fun import(stream: InputStream): Result {
         val accountCache = accountRepo.getAllAccounts().first()
@@ -32,78 +58,103 @@ class CsvImporter(
             .associateBy { "${it.type.name}:${it.name.trim().lowercase()}" }
             .toMutableMap<String, Category>()
 
-        var imported = 0
-        var skipped = 0
-        val errors = mutableListOf<String>()
+        // Strip UTF-8 BOM (EF BB BF) that Excel adds when saving as "UTF-8 with BOM"
+        val bytes = stream.readBytes()
+        val hasBom = bytes.size >= 3
+            && bytes[0] == 0xEF.toByte()
+            && bytes[1] == 0xBB.toByte()
+            && bytes[2] == 0xBF.toByte()
+        val text = String(bytes, if (hasBom) 3 else 0, bytes.size - if (hasBom) 3 else 0, Charsets.UTF_8)
+        val lines = text.lines().filter { it.isNotBlank() }
+        if (lines.isEmpty()) return Result(0, 0, emptyList())
 
-        val lines = stream.bufferedReader(Charsets.UTF_8).readLines()
-        if (lines.size < 2) return Result(0, 0, emptyList())
+        val sep = detectSeparator(lines[0])
+        val headerCols = parseLine(lines[0], sep).map { it.trim().lowercase() }
+        val colMap = buildColumnMap(headerCols)
+
+        // Check required columns
+        val missing = listOf(
+            "date"    to "date / дата",
+            "amount"  to "amount / сумма",
+            "type"    to "type / тип",
+            "account" to "account / счёт"
+        ).filter { (k, _) -> colMap[k] == null }.map { (_, label) -> label }
+
+        if (missing.isNotEmpty()) {
+            return Result(0, 0, listOf(
+                "Не найдены обязательные колонки: ${missing.joinToString(", ")}.\n" +
+                "Проверьте заголовок файла (первая строка)."
+            ))
+        }
+
+        var imported = 0
+        var skipped  = 0
+        val errors   = mutableListOf<String>()
 
         lines.drop(1).forEachIndexed { idx, raw ->
             val rowNum = idx + 2
-            if (raw.isBlank()) return@forEachIndexed
-
             try {
-                val cols = parseLine(raw)
+                val cols = parseLine(raw, sep)
+                fun cell(key: String) = colMap[key]?.let { cols.getOrElse(it) { "" }.trim() }.orEmpty()
 
-                val dateStr   = cols.getOrElse(0) { "" }.trim()
-                val typeStr   = cols.getOrElse(1) { "" }.trim()
-                val amountStr = cols.getOrElse(2) { "" }.trim()
-                val currency  = cols.getOrElse(3) { "RUB" }.trim().ifBlank { "RUB" }
-                val accName   = cols.getOrElse(4) { "" }.trim()
-                val toAccName = cols.getOrElse(5) { "" }.trim()
-                val catName   = cols.getOrElse(6) { "" }.trim()
-                val comment   = cols.getOrElse(7) { "" }.trim()
-                val uidStr    = cols.getOrElse(8) { "" }.trim()
+                val accName   = cell("account")
+                val dateStr   = cell("date")
+                val typeStr   = cell("type")
+                // Normalize amount: remove spaces, replace decimal comma with dot
+                val amountStr = cell("amount").filter { !it.isWhitespace() }.replace(",", ".")
+                val toAccName = cell("to_account")
+                val catName   = cell("category")
+                val note      = cell("note")
+                val uidStr    = cell("uid")
 
                 if (accName.isBlank()) {
-                    errors.add("Строка $rowNum: пустое название счёта")
                     skipped++
+                    errors.add("Строка $rowNum: пустое поле «счёт»")
                     return@forEachIndexed
                 }
 
-                val date = try {
-                    LocalDate.parse(dateStr)
-                } catch (e: DateTimeParseException) {
-                    throw IllegalArgumentException("Неверный формат даты: '$dateStr'")
-                }
+                val date = parseDate(dateStr)
+                    ?: throw IllegalArgumentException(
+                        "Неверная дата «$dateStr» — используйте ГГГГ-ММ-ДД или ДД.ММ.ГГГГ"
+                    )
 
-                val rawAmount = amountStr.toDoubleOrNull()
-                    ?: throw IllegalArgumentException("Неверная сумма: '$amountStr'")
+                val rawAmount = amountStr.toDoubleOrNull()?.let { abs(it) }
+                    ?: throw IllegalArgumentException("Неверная сумма «$amountStr»")
 
-                val txType = when (typeStr.lowercase()) {
-                    "income"   -> TransactionType.INCOME
-                    "expense"  -> TransactionType.EXPENSE
-                    "transfer" -> TransactionType.TRANSFER
-                    else       -> throw IllegalArgumentException("Неизвестный тип: '$typeStr'")
-                }
+                val txType = parseType(typeStr)
+                    ?: throw IllegalArgumentException(
+                        "Неизвестный тип «$typeStr» — ожидается income/доход, expense/расход, transfer/перевод"
+                    )
 
-                val amount = if (txType == TransactionType.EXPENSE) -rawAmount else rawAmount
-
-                val account = resolveAccount(accName, currency, accountCache)
-
-                val toAccount = if (txType == TransactionType.TRANSFER && toAccName.isNotBlank()) {
-                    resolveAccount(toAccName, currency, accountCache)
-                } else null
-
+                val amount  = if (txType == TransactionType.INCOME) rawAmount else -rawAmount
+                val account = resolveAccount(accName, accountCache)
+                val toAccount = if (txType == TransactionType.TRANSFER && toAccName.isNotBlank())
+                    resolveAccount(toAccName, accountCache) else null
                 val category = resolveCategory(catName, txType, categoryCache)
 
-                val txId = uidStr.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString()
+                val txId  = uidStr.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString()
+                val isNew = transactionRepo.getById(txId) == null
 
                 transactionRepo.save(
                     Transaction(
-                        id = txId,
-                        amount = amount,
-                        type = txType,
-                        categoryId = category.id,
-                        accountId = account.id,
+                        id          = txId,
+                        amount      = amount,
+                        type        = txType,
+                        categoryId  = category.id,
+                        accountId   = account.id,
                         toAccountId = toAccount?.id,
-                        note = comment,
-                        date = date,
-                        time = LocalTime.of(0, 0)
+                        note        = note,
+                        date        = date,
+                        time        = LocalTime.of(0, 0)
                     )
                 )
                 imported++
+
+                if (isNew) {
+                    accountRepo.adjustBalance(account.id, amount)
+                    if (txType == TransactionType.TRANSFER && toAccount != null)
+                        accountRepo.adjustBalance(toAccount.id, rawAmount)
+                }
             } catch (e: Exception) {
                 errors.add("Строка $rowNum: ${e.message}")
                 skipped++
@@ -113,20 +164,82 @@ class CsvImporter(
         return Result(imported, skipped, errors)
     }
 
+    // ── Separator detection ──────────────────────────────────────────────────
+
+    private fun detectSeparator(header: String): Char {
+        val counts = mapOf(
+            ','  to header.count { it == ',' },
+            ';'  to header.count { it == ';' },
+            '\t' to header.count { it == '\t' }
+        )
+        return counts.maxByOrNull { it.value }?.takeIf { it.value > 0 }?.key ?: ','
+    }
+
+    // ── Column mapping ───────────────────────────────────────────────────────
+
+    private fun buildColumnMap(headers: List<String>): Map<String, Int> {
+        val map = mutableMapOf<String, Int>()
+        headers.forEachIndexed { i, col ->
+            when (col) {
+                in dateAliases    -> map["date"]       = i
+                in amountAliases  -> map["amount"]     = i
+                in typeAliases    -> map["type"]       = i
+                in accountAliases -> map["account"]    = i
+                in toAccAliases   -> map["to_account"] = i
+                in catAliases     -> map["category"]   = i
+                in noteAliases    -> map["note"]       = i
+                in uidAliases     -> map["uid"]        = i
+            }
+        }
+        return map
+    }
+
+    // ── Parsers ──────────────────────────────────────────────────────────────
+
+    private fun parseDate(s: String): LocalDate? {
+        for (fmt in dateFormatters) {
+            try { return LocalDate.parse(s, fmt) } catch (_: Exception) {}
+        }
+        return null
+    }
+
+    private fun parseType(s: String): TransactionType? = when (s.trim().lowercase()) {
+        in incomeValues   -> TransactionType.INCOME
+        in expenseValues  -> TransactionType.EXPENSE
+        in transferValues -> TransactionType.TRANSFER
+        else              -> null
+    }
+
+    private fun parseLine(line: String, sep: Char): List<String> {
+        val result = mutableListOf<String>()
+        val sb = StringBuilder()
+        var inQuotes = false
+        for (ch in line) {
+            when {
+                ch == '"'              -> inQuotes = !inQuotes
+                ch == sep && !inQuotes -> { result.add(sb.toString()); sb.clear() }
+                else                   -> sb.append(ch)
+            }
+        }
+        result.add(sb.toString())
+        return result
+    }
+
+    // ── Resolvers ────────────────────────────────────────────────────────────
+
     private suspend fun resolveAccount(
         name: String,
-        currency: String,
         cache: MutableMap<String, Account>
     ): Account {
         val key = name.lowercase()
         return cache[key] ?: run {
             val new = Account(
-                id = UUID.randomUUID().toString(),
-                name = name,
-                currency = currency,
-                balance = 0.0,
-                type = AccountType.CARD,
-                color = COLORS[cache.size % COLORS.size],
+                id        = UUID.randomUUID().toString(),
+                name      = name,
+                currency  = "RUB",
+                balance   = 0.0,
+                type      = AccountType.CARD,
+                color     = COLORS[cache.size % COLORS.size],
                 sortOrder = cache.size
             )
             accountRepo.save(new)
@@ -147,11 +260,11 @@ class CsvImporter(
         val key = "${catType.name}:${effectiveName.lowercase()}"
         return cache[key] ?: run {
             val new = Category(
-                id = UUID.randomUUID().toString(),
-                name = effectiveName,
-                iconCode = "other",
-                color = COLORS[cache.size % COLORS.size],
-                type = catType,
+                id        = UUID.randomUUID().toString(),
+                name      = effectiveName,
+                iconCode  = "other",
+                color     = COLORS[cache.size % COLORS.size],
+                type      = catType,
                 sortOrder = cache.size
             )
             categoryRepo.save(new)
@@ -160,23 +273,33 @@ class CsvImporter(
         }
     }
 
-    // Handles quoted fields and commas inside quotes
-    private fun parseLine(line: String): List<String> {
-        val result = mutableListOf<String>()
-        val sb = StringBuilder()
-        var inQuotes = false
-        for (ch in line) {
-            when {
-                ch == '"'              -> inQuotes = !inQuotes
-                ch == ',' && !inQuotes -> { result.add(sb.toString()); sb.clear() }
-                else                   -> sb.append(ch)
-            }
-        }
-        result.add(sb.toString())
-        return result
-    }
+    // ── Template ─────────────────────────────────────────────────────────────
 
     companion object {
+        /**
+         * Minimal template the user can open in Excel / Google Sheets,
+         * fill in rows and import back into the app.
+         */
+        const val TEMPLATE_CSV = "date,amount,type,account,category,to_account,note\n" +
+            "2024-01-15,500,expense,Сбер,Продукты,,Покупка в Магните\n" +
+            "2024-01-16,50000,income,Тинькофф,Зарплата,,Январь\n" +
+            "2024-01-17,10000,transfer,Сбер,,Тинькофф,Перевод на карту"
+
+        /** Human-readable format description shown in the UI. */
+        const val FORMAT_DESCRIPTION =
+            "Обязательные колонки (любой порядок, рус./англ. названия):\n" +
+            "  date / дата       — дата: ГГГГ-ММ-ДД или ДД.ММ.ГГГГ\n" +
+            "  amount / сумма    — сумма (положительное число)\n" +
+            "  type / тип        — income/доход · expense/расход · transfer/перевод\n" +
+            "  account / счёт    — название счёта списания\n\n" +
+            "Необязательные колонки:\n" +
+            "  category / категория\n" +
+            "  to_account / счёт назначения  — для переводов\n" +
+            "  note / комментарий\n\n" +
+            "Разделитель: запятая, точка с запятой или Tab.\n" +
+            "Кодировка: UTF-8 (или UTF-8 with BOM — Excel).\n" +
+            "Дробная часть: точка или запятая (500.50 или 500,50)."
+
         private val COLORS = listOf(
             "#C5FF4A", "#FF6B5B", "#52E0C4", "#9B8BFF",
             "#FFD24A", "#FF9DC4", "#7BB8FF", "#A0A0A0"

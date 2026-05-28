@@ -2,26 +2,44 @@
 
 A minimalist personal finance app for Android, built with Jetpack Compose. Track expenses, income, and transfers across multiple accounts with category budgets, recurring transactions, statistics, and optional PIN/biometric lock.
 
-## Screenshots
-
-> _Add screenshots to `docs/screenshots/` and update paths below._
-
-| Home | Add Transaction | Statistics | Settings |
-|------|----------------|------------|----------|
-| ![home](docs/screenshots/home.png) | ![add](docs/screenshots/add.png) | ![stats](docs/screenshots/stats.png) | ![settings](docs/screenshots/settings.png) |
-
 ---
 
 ## Features
 
 - **Transactions** — expense, income, transfer; search and filter by date
-- **Accounts** — multiple accounts with currency support (RUB, USD, EUR) and real-time balance tracking
-- **Categories** — custom categories with color coding and monthly budget limits
-- **Statistics** — donut chart breakdown, radial KPI rings, 12-month trend bars, 30-day activity heatmap
+- **Accounts** — multiple accounts with balance tracking and sparkline history
+- **Categories** — custom categories with 64-color palette, budget limits, and deletion
+- **Statistics**
+  - Expense donut chart with per-category breakdown
+  - Income donut chart with per-category breakdown
+  - 12-month stacked bar trend (income + expense)
+  - 30-day activity heatmap
+  - Period navigation: Day / Week / Month / Year with ‹ › buttons and swipe gesture
+- **CSV Import** — bulk-import transactions from a CSV file (see format below)
+- **CSV Export** — export all transactions to a CSV file via the system file picker
 - **Recurring transactions** — daily / weekly / monthly / yearly templates via WorkManager
 - **Security** — 4-digit PIN with SHA-256 hashing, optional biometric (fingerprint / face) unlock
 - **Themes** — dark and light theme, toggleable at runtime
 - **Offline-first** — all data stored locally in Room (SQLite); no network required
+
+---
+
+## CSV Format
+
+The app imports and exports a UTF-8 CSV with the following columns:
+
+| Column | Description | Example |
+|--------|-------------|---------|
+| `uid` | Unique transaction ID (any string) | `tx-001` |
+| `date` | ISO date `YYYY-MM-DD` | `2025-03-15` |
+| `amount` | Positive decimal | `4500.00` |
+| `type` | `income`, `expense`, or `transfer` | `expense` |
+| `account` | Account name (created if missing) | `Тинькофф` |
+| `to_account` | Destination account for transfers | `Сбер` |
+| `category` | Category name (created if missing) | `Продукты` |
+| `note` | Free-text note | `Пятёрочка` |
+
+A sample two-year dataset with realistic Russian household transactions is provided in [`csv/demo_2years.csv`](csv/demo_2years.csv).
 
 ---
 
@@ -50,7 +68,7 @@ A minimalist personal finance app for Android, built with Jetpack Compose. Track
 app/src/main/java/com/ledger/app/
 │
 ├── LedgerApplication.kt          # Application class — DI root, repo init, WorkManager
-├── MainActivity.kt               # Single activity; splash screen, theme, PIN gate
+├── MainActivity.kt               # Single activity; splash, theme, PIN gate, file picker
 │
 ├── domain/model/                 # Pure Kotlin data classes — no Android deps
 │   ├── Account.kt
@@ -64,18 +82,19 @@ app/src/main/java/com/ledger/app/
 │   │   ├── entity/               # Room @Entity classes + toDomain() / fromDomain()
 │   │   └── dao/                  # @Dao interfaces (queries, aggregates)
 │   ├── repository/               # Repository layer; wraps DAOs, exposes Flow / suspend
+│   ├── CsvImporter.kt            # CSV parser — upserts accounts, categories, transactions
 │   └── prefs/
-│       └── PrefsManager.kt       # DataStore — dark theme preference
+│       └── PrefsManager.kt       # DataStore — theme, exchange rates, net-worth currency
 │
 ├── security/
-│   └── SecurityManager.kt        # PIN hash storage + biometric enabled flag (DataStore)
+│   └── SecurityManager.kt        # PIN hash storage + biometric flag (DataStore)
 │
 ├── worker/
 │   ├── RecurringTransactionWorker.kt  # Daily CoroutineWorker — fires due recurring templates
 │   └── BootReceiver.kt               # Re-registers WorkManager after device reboot
 │
 ├── util/
-│   ├── Extensions.kt             # LocalDate / LocalTime / Double formatting extensions
+│   ├── Extensions.kt             # LocalDate / LocalTime / Double formatting helpers
 │   └── DefaultData.kt            # Seed accounts and categories on first launch
 │
 └── ui/
@@ -84,9 +103,9 @@ app/src/main/java/com/ledger/app/
     │   ├── AmountDisplay.kt      # BigAmountDisplay — large inline amount input
     │   ├── TransactionRow.kt     # Single transaction list item
     │   ├── BottomNav.kt          # LedgerBottomNav + NavTab sealed class
+    │   ├── AccountDialog.kt      # Account add/edit dialog + ColorPickerRow (64 colors)
     │   ├── DonutChart.kt         # Segmented donut (Canvas)
-    │   ├── RadialRing.kt         # KPI progress ring (Canvas)
-    │   ├── BarChart.kt           # StackedBarChart — 12-month trend
+    │   ├── BarChart.kt           # StackedBarChart — 12-month income/expense trend
     │   ├── SparklineChart.kt     # Mini sparkline for account chips
     │   ├── HeatmapGrid.kt        # 30-day activity heatmap grid
     │   └── SectionHeader.kt
@@ -98,10 +117,10 @@ app/src/main/java/com/ledger/app/
         ├── add/                  # Add / edit transaction form
         ├── detail/               # Transaction detail + delete / duplicate
         ├── accounts/             # Account list with net worth and quick stats
-        ├── categories/           # Category list with budget progress bars
-        ├── stats/                # Statistics — charts, KPIs, heatmap, breakdown
+        ├── categories/           # Category list with budget bars and deletion
+        ├── stats/                # Statistics — donuts, bar chart, heatmap, period nav
         ├── pin/                  # PIN entry + setup (VERIFY / SET / CONFIRM modes)
-        └── settings/             # Theme, PIN, biometric, data management
+        └── settings/             # Theme, PIN, biometric, CSV import/export, data reset
 ```
 
 ---

@@ -36,11 +36,16 @@ fun LedgerBottomNav(
     val c = MaterialTheme.ledger
     val borderColor = c.border
 
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(c.bg)
+            .navigationBarsPadding()
+    ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(64.dp)
-            .background(c.bg)
             .drawBehind {
                 drawLine(
                     color = borderColor,
@@ -101,5 +106,6 @@ fun LedgerBottomNav(
                 }
             }
         }
+    }
     }
 }

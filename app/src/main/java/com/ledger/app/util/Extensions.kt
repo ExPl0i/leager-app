@@ -18,7 +18,7 @@ fun LocalDate.formatFull(): String {
     val dayOfWeek = when (dayOfWeek.value) {
         1 -> "пн"; 2 -> "вт"; 3 -> "ср"; 4 -> "чт"; 5 -> "пт"; 6 -> "сб"; else -> "вс"
     }
-    return "${dayOfWeek.uppercase()}, ${dayOfMonth} ${RU_MONTHS[monthValue - 1].uppercase()}"
+    return "${dayOfWeek.uppercase()}, ${dayOfMonth} ${RU_MONTHS[monthValue - 1].uppercase()} ${year}"
 }
 
 fun LocalDate.isToday(): Boolean = this == LocalDate.now()

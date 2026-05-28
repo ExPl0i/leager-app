@@ -1,8 +1,8 @@
 package com.ledger.app.ui.screen.stats
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -12,6 +12,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -23,8 +25,6 @@ import com.ledger.app.ui.theme.IbmPlexMonoFamily
 import com.ledger.app.ui.theme.IbmPlexSansFamily
 import com.ledger.app.ui.theme.ledger
 import com.ledger.app.util.formatMoney
-import com.ledger.app.util.formatSigned
-import java.time.LocalDate
 
 @Composable
 fun StatsScreen(
@@ -34,7 +34,6 @@ fun StatsScreen(
     val vm: StatsViewModel = viewModel()
     val state by vm.state.collectAsStateWithLifecycle()
     val c = MaterialTheme.ledger
-    val now = LocalDate.now()
 
     LazyColumn(modifier = Modifier.fillMaxSize().background(c.bg)) {
 
@@ -46,10 +45,10 @@ fun StatsScreen(
                 verticalAlignment = Alignment.Bottom
             ) {
                 Column {
-                    Text("STATS · ${now.month.name.take(3).uppercase()} ${now.year}",
-                        fontFamily = IbmPlexMonoFamily, fontSize = 10.sp, letterSpacing = 1.2.sp, color = c.faint)
-                    Text("${now.withDayOfMonth(1).dayOfMonth}—${now.dayOfMonth} ${now.month.name.take(3).uppercase()} · ${now.dayOfMonth} ДНЕЙ",
-                        fontFamily = IbmPlexMonoFamily, fontSize = 14.sp, color = c.muted, modifier = Modifier.padding(top = 6.dp))
+                    Text("STATS", fontFamily = IbmPlexMonoFamily, fontSize = 10.sp,
+                        letterSpacing = 1.2.sp, color = c.faint)
+                    Text(state.periodLabel.ifEmpty { "—" }, fontFamily = IbmPlexMonoFamily,
+                        fontSize = 15.sp, color = c.text, modifier = Modifier.padding(top = 6.dp))
                 }
             }
         }
@@ -57,9 +56,9 @@ fun StatsScreen(
         // Period tabs
         item {
             Row(modifier = Modifier.fillMaxWidth().drawBehind {
-                drawLine(c.border, androidx.compose.ui.geometry.Offset(0f, size.height), androidx.compose.ui.geometry.Offset(size.width, size.height), 1.dp.toPx())
+                drawLine(c.border, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
             }) {
-                StatsPeriod.entries.forEachIndexed { idx, period ->
+                StatsPeriod.entries.forEach { period ->
                     val isSelected = state.period == period
                     Box(
                         modifier = Modifier
@@ -69,8 +68,7 @@ fun StatsScreen(
                             .padding(vertical = 12.dp)
                             .drawBehind {
                                 if (isSelected) drawLine(c.lime,
-                                    androidx.compose.ui.geometry.Offset(0f, size.height),
-                                    androidx.compose.ui.geometry.Offset(size.width, size.height), 2.dp.toPx())
+                                    Offset(0f, size.height), Offset(size.width, size.height), 2.dp.toPx())
                             },
                         contentAlignment = Alignment.Center
                     ) {
@@ -81,88 +79,153 @@ fun StatsScreen(
             }
         }
 
-        // Donut + breakdown
+        // Expense donut + breakdown (swipe left/right to navigate periods)
         item {
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp)) {
-                DonutChart(
-                    segments = state.donutSegments,
-                    size = 156.dp,
-                    thickness = 22.dp,
-                    trackColor = c.surface2,
-                    center = {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("SPENT", fontFamily = IbmPlexMonoFamily, fontSize = 9.sp, letterSpacing = 1.2.sp, color = c.faint)
-                            Text(state.totalExpense.formatMoney(), fontFamily = IbmPlexMonoFamily,
-                                fontWeight = FontWeight.Medium, fontSize = 20.sp, letterSpacing = (-0.5).sp, color = c.text)
-                        }
+            var swipeOffset by remember { mutableStateOf(0f) }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .pointerInput(Unit) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { _ -> swipeOffset = 0f },
+                            onHorizontalDrag = { _, drag -> swipeOffset += drag },
+                            onDragEnd = {
+                                when {
+                                    swipeOffset < -80f -> vm.shiftPeriod(-1)
+                                    swipeOffset > 80f  -> vm.shiftPeriod(1)
+                                }
+                                swipeOffset = 0f
+                            },
+                            onDragCancel = { swipeOffset = 0f }
+                        )
                     }
-                )
-                Spacer(Modifier.width(18.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("BREAKDOWN", fontFamily = IbmPlexMonoFamily, fontSize = 10.sp, letterSpacing = 1.4.sp, color = c.faint)
-                    Spacer(Modifier.height(8.dp))
-                    state.categoryBreakdown.take(5).forEach { breakdown ->
-                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(6.dp).background(parseHexColor(breakdown.category.color)))
-                            Spacer(Modifier.width(8.dp))
-                            Text(breakdown.category.name, fontFamily = IbmPlexSansFamily, fontSize = 12.sp, color = c.text, modifier = Modifier.weight(1f))
-                            Text("${(breakdown.pct * 100).toInt()}%", fontFamily = IbmPlexMonoFamily, fontSize = 11.sp, color = c.muted)
-                        }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(top = 20.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("РАСХОДЫ", fontFamily = IbmPlexMonoFamily, fontSize = 10.sp,
+                        letterSpacing = 1.4.sp, color = c.faint)
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Text("‹", fontFamily = IbmPlexMonoFamily, fontSize = 18.sp, color = c.muted,
+                            modifier = Modifier.clickable { vm.shiftPeriod(-1) }.padding(horizontal = 4.dp))
+                        Text("›", fontFamily = IbmPlexMonoFamily, fontSize = 18.sp, color = c.muted,
+                            modifier = Modifier.clickable { vm.shiftPeriod(1) }.padding(horizontal = 4.dp))
                     }
-                    if (state.categoryBreakdown.size > 5) {
-                        Text("+${state.categoryBreakdown.size - 5} more", fontFamily = IbmPlexMonoFamily, fontSize = 11.sp, color = c.faint, modifier = Modifier.padding(top = 4.dp))
+                }
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+                    DonutChart(
+                        segments = state.donutSegments,
+                        size = 156.dp,
+                        thickness = 22.dp,
+                        trackColor = c.surface2,
+                        center = {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("SPENT", fontFamily = IbmPlexMonoFamily, fontSize = 9.sp,
+                                    letterSpacing = 1.2.sp, color = c.faint)
+                                Text(state.totalExpense.formatMoney(), fontFamily = IbmPlexMonoFamily,
+                                    fontWeight = FontWeight.Medium, fontSize = 20.sp,
+                                    letterSpacing = (-0.5).sp, color = c.text)
+                            }
+                        }
+                    )
+                    Spacer(Modifier.width(18.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("BREAKDOWN", fontFamily = IbmPlexMonoFamily, fontSize = 10.sp,
+                            letterSpacing = 1.4.sp, color = c.faint)
+                        Spacer(Modifier.height(8.dp))
+                        state.categoryBreakdown.take(5).forEach { bd ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(modifier = Modifier.size(6.dp).background(parseHexColor(bd.category.color)))
+                                Spacer(Modifier.width(8.dp))
+                                Text(bd.category.name, fontFamily = IbmPlexSansFamily, fontSize = 12.sp,
+                                    color = c.text, modifier = Modifier.weight(1f))
+                                Text("${(bd.pct * 100).toInt()}%", fontFamily = IbmPlexMonoFamily,
+                                    fontSize = 11.sp, color = c.muted)
+                            }
+                        }
+                        if (state.categoryBreakdown.size > 5) {
+                            Text("+${state.categoryBreakdown.size - 5} more", fontFamily = IbmPlexMonoFamily,
+                                fontSize = 11.sp, color = c.faint, modifier = Modifier.padding(top = 4.dp))
+                        }
                     }
                 }
             }
         }
 
-        // KPI rings
+        // Income donut + breakdown
         item {
-            val incomeTarget = state.totalIncome.coerceAtLeast(1.0)
-            val budgetTotal = state.categoryBreakdown.sumOf { it.category.budget ?: 0.0 }.coerceAtLeast(1.0)
-            val net = state.totalIncome - state.totalExpense
-            val netRatio = if (incomeTarget > 0) (net / incomeTarget).coerceIn(-1.0, 1.0) else 0.0
-            Row(modifier = Modifier.fillMaxWidth()
-                .drawBehind {
-                    drawLine(c.border, androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(size.width, 0f), 1.dp.toPx())
-                    drawLine(c.border, androidx.compose.ui.geometry.Offset(0f, size.height), androidx.compose.ui.geometry.Offset(size.width, size.height), 1.dp.toPx())
+            Column(
+                modifier = Modifier.fillMaxWidth().drawBehind {
+                    drawLine(c.border, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx())
                 }
             ) {
-                listOf(
-                    Triple(state.totalIncome / incomeTarget, "INCOME", state.totalIncome.formatMoney()),
-                    Triple(state.totalExpense / budgetTotal, "EXPENSE", "−${state.totalExpense.formatMoney()}"),
-                    Triple(netRatio, "NET", net.formatSigned())
-                ).forEachIndexed { idx, (ratio, kpiLabel, amt) ->
-                    Column(
-                        modifier = Modifier.weight(1f).padding(12.dp, 16.dp, 12.dp, 18.dp)
-                            .drawBehind {
-                                if (idx < 2) drawLine(c.border, androidx.compose.ui.geometry.Offset(size.width, 0f), androidx.compose.ui.geometry.Offset(size.width, size.height), 1.dp.toPx())
-                            },
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        RadialRing(
-                            value = ratio.toFloat().coerceIn(0f, 1f),
-                            size = 54.dp,
-                            thickness = 3.dp,
-                            color = if (ratio > 0.9 && kpiLabel == "EXPENSE") c.red else c.lime,
-                            label = "${(ratio * 100).toInt()}%",
-                            sublabel = when (kpiLabel) { "INCOME" -> "OF GOAL"; "EXPENSE" -> "BUDGET"; else -> "DAYS" },
-                            labelSize = 12.sp
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(kpiLabel, fontFamily = IbmPlexMonoFamily, fontSize = 9.sp, letterSpacing = 1.2.sp, color = c.faint)
-                        Text(amt, fontFamily = IbmPlexMonoFamily, fontWeight = FontWeight.Medium, fontSize = 13.sp,
-                            color = if (kpiLabel == "EXPENSE") c.text else c.lime, modifier = Modifier.padding(top = 4.dp))
+                Text("ДОХОДЫ", fontFamily = IbmPlexMonoFamily, fontSize = 10.sp,
+                    letterSpacing = 1.4.sp, color = c.faint,
+                    modifier = Modifier.padding(horizontal = 20.dp).padding(top = 20.dp, bottom = 8.dp))
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+                    DonutChart(
+                        segments = state.incomeDonutSegments,
+                        size = 156.dp,
+                        thickness = 22.dp,
+                        trackColor = c.surface2,
+                        center = {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("EARNED", fontFamily = IbmPlexMonoFamily, fontSize = 9.sp,
+                                    letterSpacing = 1.2.sp, color = c.faint)
+                                Text(state.totalIncome.formatMoney(), fontFamily = IbmPlexMonoFamily,
+                                    fontWeight = FontWeight.Medium, fontSize = 20.sp,
+                                    letterSpacing = (-0.5).sp, color = c.lime)
+                            }
+                        }
+                    )
+                    Spacer(Modifier.width(18.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("BREAKDOWN", fontFamily = IbmPlexMonoFamily, fontSize = 10.sp,
+                            letterSpacing = 1.4.sp, color = c.faint)
+                        Spacer(Modifier.height(8.dp))
+                        state.incomeCategoryBreakdown.take(5).forEach { bd ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(modifier = Modifier.size(6.dp).background(parseHexColor(bd.category.color)))
+                                Spacer(Modifier.width(8.dp))
+                                Text(bd.category.name, fontFamily = IbmPlexSansFamily, fontSize = 12.sp,
+                                    color = c.text, modifier = Modifier.weight(1f))
+                                Text("${(bd.pct * 100).toInt()}%", fontFamily = IbmPlexMonoFamily,
+                                    fontSize = 11.sp, color = c.muted)
+                            }
+                        }
+                        if (state.incomeCategoryBreakdown.size > 5) {
+                            Text("+${state.incomeCategoryBreakdown.size - 5} more", fontFamily = IbmPlexMonoFamily,
+                                fontSize = 11.sp, color = c.faint, modifier = Modifier.padding(top = 4.dp))
+                        }
                     }
                 }
             }
         }
 
-        // Monthly trend
+        // Monthly trend (12 months, fixed)
         item {
-            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp)) {
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = 20.dp, vertical = 20.dp)
+                    .drawBehind {
+                        drawLine(c.border, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx())
+                    }
+                    .padding(top = 16.dp)
+            ) {
                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                    Text("TREND · 12 MONTHS", fontFamily = IbmPlexMonoFamily, fontSize = 10.sp, letterSpacing = 1.2.sp, color = c.faint)
+                    Text("TREND · 12 MONTHS", fontFamily = IbmPlexMonoFamily, fontSize = 10.sp,
+                        letterSpacing = 1.2.sp, color = c.faint)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         LegendItem("IN", c.lime)
                         LegendItem("OUT", c.red)
@@ -176,14 +239,14 @@ fun StatsScreen(
         // Heatmap
         item {
             Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                Text("DAILY ACTIVITY · 30D", fontFamily = IbmPlexMonoFamily, fontSize = 10.sp,
+                    letterSpacing = 1.2.sp, color = c.faint,
+                    modifier = Modifier.padding(bottom = 12.dp))
+                HeatmapGrid(values = state.heatmapValues, columns = 15, modifier = Modifier.fillMaxWidth())
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("DAILY ACTIVITY · 30D", fontFamily = IbmPlexMonoFamily, fontSize = 10.sp, letterSpacing = 1.2.sp, color = c.faint)
-                }
-                HeatmapGrid(values = state.heatmapValues, columns = 15, modifier = Modifier.fillMaxWidth())
-                Row(modifier = Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("LESS", fontFamily = IbmPlexMonoFamily, fontSize = 9.sp, color = c.faint)
                     Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                         listOf(0.08f, 0.25f, 0.5f, 0.75f, 1f).forEach { opacity ->
@@ -195,9 +258,9 @@ fun StatsScreen(
             }
         }
 
-        // Category list
+        // Category list (expense)
         item {
-            Text("CATEGORIES · ${LocalDate.now().month.name.take(3).uppercase()}",
+            Text("КАТЕГОРИИ · ${state.periodLabel}",
                 fontFamily = IbmPlexMonoFamily, fontSize = 10.sp, letterSpacing = 1.4.sp, color = c.faint,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
         }
@@ -208,23 +271,37 @@ fun StatsScreen(
             val over = pct > 1f
             val color = parseHexColor(cat.color)
 
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp).drawBehind {
-                drawLine(c.border, androidx.compose.ui.geometry.Offset(0f, size.height), androidx.compose.ui.geometry.Offset(size.width, size.height), 1.dp.toPx())
-            }, verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 10.dp)
+                    .drawBehind {
+                        drawLine(c.border, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
+                    },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Box(modifier = Modifier.width(6.dp).height(32.dp).background(color))
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(cat.name, fontFamily = IbmPlexSansFamily, fontWeight = FontWeight.Medium, fontSize = 13.sp, color = c.text)
-                        Text("−${item.spent.formatMoney()}", fontFamily = IbmPlexMonoFamily, fontSize = 12.sp, color = if (over) c.red else c.text)
+                        Text(cat.name, fontFamily = IbmPlexSansFamily, fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp, color = c.text)
+                        Text("−${item.spent.formatMoney()}", fontFamily = IbmPlexMonoFamily,
+                            fontSize = 12.sp, color = if (over) c.red else c.text)
                     }
                     if (budget != null) {
-                        Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(c.surface2).padding(top = 6.dp)) {
-                            Box(modifier = Modifier.fillMaxWidth(pct.coerceIn(0f, 1f)).fillMaxHeight().background(if (over) c.red else color))
+                        Box(modifier = Modifier
+                            .fillMaxWidth().height(2.dp)
+                            .background(c.surface2).padding(top = 6.dp)
+                        ) {
+                            Box(modifier = Modifier
+                                .fillMaxWidth(pct.coerceIn(0f, 1f)).fillMaxHeight()
+                                .background(if (over) c.red else color))
                         }
-                        Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("${(pct * 100).toInt()}% of ${budget.formatMoney()}", fontFamily = IbmPlexMonoFamily, fontSize = 9.sp, letterSpacing = 0.6.sp, color = c.faint)
-                        }
+                        Text("${(pct * 100).toInt()}% of ${budget.formatMoney()}",
+                            fontFamily = IbmPlexMonoFamily, fontSize = 9.sp,
+                            letterSpacing = 0.6.sp, color = c.faint,
+                            modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }
@@ -242,4 +319,3 @@ private fun LegendItem(label: String, color: androidx.compose.ui.graphics.Color)
         Text(label, fontFamily = IbmPlexMonoFamily, fontSize = 9.sp, color = c.muted, letterSpacing = 0.8.sp)
     }
 }
-

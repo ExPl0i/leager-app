@@ -25,7 +25,8 @@ fun StackedBarChart(
     val c = MaterialTheme.ledger
     if (entries.isEmpty()) return
 
-    val maxVal = entries.maxOf { maxOf(it.income, it.expense) }.coerceAtLeast(1f)
+    // Scale by combined sum so stacked bars always fit within canvas height
+    val maxVal = entries.maxOf { it.income + it.expense }.coerceAtLeast(1f)
 
     Column(modifier = modifier) {
         Canvas(
@@ -42,8 +43,8 @@ fun StackedBarChart(
                 val alphaIn  = if (isLast || !highlightLast) 1f else 0.6f
                 val alphaOut = if (isLast || !highlightLast) 1f else 0.5f
 
-                val incH  = (entry.income  / maxVal) * barH * 0.85f
-                val expH  = (entry.expense / maxVal) * barH * 0.85f
+                val incH  = (entry.income  / maxVal) * barH * 0.92f
+                val expH  = (entry.expense / maxVal) * barH * 0.92f
 
                 // Income bar (top)
                 drawRect(

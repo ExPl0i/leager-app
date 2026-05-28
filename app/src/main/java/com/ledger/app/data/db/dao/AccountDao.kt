@@ -34,6 +34,9 @@ interface AccountDao {
     @Delete
     suspend fun delete(account: AccountEntity)
 
+    @Query("UPDATE accounts SET balance = 0")
+    suspend fun resetAllBalances()
+
     @Query("SELECT COUNT(*) FROM accounts")
     suspend fun count(): Int
 }

@@ -71,14 +71,14 @@ fun HomeScreen(
                 Column {
                     Text(
                         text = LocalDate.now().formatFull(),
-                        fontFamily = IbmPlexMonoFamily, fontSize = 10.sp,
-                        letterSpacing = 1.4.sp, color = c.faint
+                        fontFamily = IbmPlexMonoFamily, fontSize = 13.sp,
+                        letterSpacing = 1.0.sp, color = c.faint
                     )
                     Text(
                         text = "LEDGER",
                         fontFamily = IbmPlexMonoFamily, fontWeight = FontWeight.Medium,
-                        fontSize = 12.sp, letterSpacing = 1.6.sp, color = c.text,
-                        modifier = Modifier.padding(top = 4.dp)
+                        fontSize = 28.sp, letterSpacing = 2.sp, color = c.text,
+                        modifier = Modifier.padding(top = 2.dp)
                     )
                 }
                 Box(

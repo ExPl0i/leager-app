@@ -26,6 +26,8 @@ class AccountRepository(private val dao: AccountDao) {
 
     suspend fun delete(account: Account) = dao.delete(AccountEntity.fromDomain(account))
 
+    suspend fun resetAllBalances() = dao.resetAllBalances()
+
     suspend fun seedIfEmpty(accounts: List<Account>) {
         if (dao.count() == 0) {
             dao.insertAll(accounts.map { AccountEntity.fromDomain(it) })

@@ -1,12 +1,20 @@
 package com.ledger.app
 
+import android.Manifest
+import android.app.Activity
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.fragment.app.FragmentActivity
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -22,8 +30,120 @@ import kotlinx.coroutines.runBlocking
 
 class MainActivity : FragmentActivity() {
 
+    // Fixed request codes — always within 16 bits, bypasses ActivityResultRegistry entirely
+    companion object {
+        private const val RC_CSV_PICK   = 1001
+        private const val RC_STORAGE    = 1002
+        private const val RC_CSV_EXPORT = 1003
+    }
+
+    private var onCsvResult        : ((Uri?) -> Unit)? = null
+    private var onCsvError         : ((String) -> Unit)? = null
+    private var pendingExportCsv   : String? = null
+    private var onExportError      : ((String) -> Unit)? = null
+
+    /**
+     * Opens the system file picker for CSV import.
+     * Requests READ_EXTERNAL_STORAGE on Android 6–12 if not yet granted.
+     */
+    fun openCsvPicker(onResult: (Uri?) -> Unit, onError: (String) -> Unit) {
+        onCsvResult = onResult
+        onCsvError  = onError
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE), RC_STORAGE)
+        } else {
+            launchFilePicker()
+        }
+    }
+
+    fun openCsvExport(csvContent: String, onError: (String) -> Unit) {
+        pendingExportCsv = csvContent
+        onExportError    = onError
+        try {
+            val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "text/csv"
+                putExtra(Intent.EXTRA_TITLE,
+                    "ledger_export_${java.time.LocalDate.now()}.csv")
+            }
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, RC_CSV_EXPORT)
+        } catch (e: Exception) {
+            onError("Не удалось открыть менеджер файлов: ${e.localizedMessage ?: e.javaClass.simpleName}")
+            pendingExportCsv = null
+            onExportError    = null
+        }
+    }
+
+    private fun launchFilePicker() {
+        try {
+            val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                type = "*/*"
+                addCategory(Intent.CATEGORY_OPENABLE)
+            }
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, RC_CSV_PICK)
+        } catch (e: Exception) {
+            onCsvError?.invoke(
+                "Не удалось открыть файловый менеджер: ${e.localizedMessage ?: e.javaClass.simpleName}"
+            )
+            onCsvResult = null
+            onCsvError  = null
+        }
+    }
+
+    @Deprecated("Required for file picker result")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == RC_CSV_PICK) {
+            val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
+            onCsvResult?.invoke(uri)
+            onCsvResult = null
+            onCsvError  = null
+        }
+        if (requestCode == RC_CSV_EXPORT && resultCode == Activity.RESULT_OK) {
+            val uri = data?.data
+            if (uri != null) {
+                try {
+                    contentResolver.openOutputStream(uri)?.use { stream ->
+                        stream.write(pendingExportCsv!!.toByteArray(Charsets.UTF_8))
+                    }
+                } catch (e: Exception) {
+                    onExportError?.invoke("Ошибка записи файла: ${e.localizedMessage ?: e.javaClass.simpleName}")
+                }
+            }
+            pendingExportCsv = null
+            onExportError    = null
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == RC_STORAGE) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                launchFilePicker()
+            } else {
+                onCsvError?.invoke("Доступ к файлам запрещён. Разрешите его в настройках приложения.")
+                onCsvResult = null
+                onCsvError  = null
+            }
+        }
+    }
+
+    // ── Lifecycle ────────────────────────────────────────────────────────────
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
         val app = application as LedgerApplication
@@ -73,7 +193,9 @@ class MainActivity : FragmentActivity() {
                         navController = navController,
                         app = app,
                         startDestination = startDestination,
-                        modifier = Modifier.padding(paddingValues)
+                        modifier = Modifier
+                            .padding(paddingValues)
+                            .imePadding()
                     )
                 }
             }

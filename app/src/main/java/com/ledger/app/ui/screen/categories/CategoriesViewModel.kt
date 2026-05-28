@@ -83,6 +83,13 @@ class CategoriesViewModel(application: Application) : AndroidViewModel(applicati
         _state.value = _state.value.copy(showDialog = false, editTarget = null)
     }
 
+    fun deleteCategory(cat: Category) {
+        viewModelScope.launch {
+            app.categoryRepo.delete(cat)
+            dismissDialog()
+        }
+    }
+
     fun saveCategory(
         name: String,
         type: CategoryType,

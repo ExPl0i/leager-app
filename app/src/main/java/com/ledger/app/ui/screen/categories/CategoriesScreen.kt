@@ -6,7 +6,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -14,25 +16,25 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ledger.app.LedgerApplication
 import com.ledger.app.domain.model.Category
 import com.ledger.app.domain.model.CategoryType
+import com.ledger.app.ui.components.ColorPickerRow
+import com.ledger.app.ui.components.LEDGER_COLOR_PALETTE
 import com.ledger.app.ui.components.parseHexColor
 import com.ledger.app.ui.theme.IbmPlexMonoFamily
 import com.ledger.app.ui.theme.IbmPlexSansFamily
 import com.ledger.app.ui.theme.ledger
 import com.ledger.app.util.formatMoney
-
-private val CATEGORY_PRESET_COLORS = listOf(
-    "#C5FF4A", "#FF6B5B", "#52E0C4", "#9B8BFF",
-    "#FFD24A", "#FF9DC4", "#7BB8FF", "#E89AFF", "#A0A0A0"
-)
 
 @Composable
 fun CategoriesScreen(
@@ -48,7 +50,8 @@ fun CategoriesScreen(
             editTarget = state.editTarget,
             defaultType = state.selectedTab,
             onDismiss = vm::dismissDialog,
-            onSave = { name, type, color, budget -> vm.saveCategory(name, type, color, budget) }
+            onSave = { name, type, color, budget -> vm.saveCategory(name, type, color, budget) },
+            onDelete = state.editTarget?.let { cat -> { vm.deleteCategory(cat) } }
         )
     }
 
@@ -84,10 +87,7 @@ fun CategoriesScreen(
                     .padding(horizontal = 20.dp)
                     .padding(top = 18.dp)
                     .drawBehind {
-                        drawLine(c.border,
-                            androidx.compose.ui.geometry.Offset(0f, size.height),
-                            androidx.compose.ui.geometry.Offset(size.width, size.height),
-                            1.dp.toPx())
+                        drawLine(c.border, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
                     }
             ) {
                 listOf(
@@ -101,8 +101,8 @@ fun CategoriesScreen(
                             .clickable { vm.selectTab(type) }
                             .drawBehind {
                                 if (isSelected) drawLine(c.lime,
-                                    androidx.compose.ui.geometry.Offset(0f, size.height + 1.dp.toPx()),
-                                    androidx.compose.ui.geometry.Offset(size.width, size.height + 1.dp.toPx()),
+                                    Offset(0f, size.height + 1.dp.toPx()),
+                                    Offset(size.width, size.height + 1.dp.toPx()),
                                     2.dp.toPx())
                             }
                             .padding(vertical = 10.dp)
@@ -130,10 +130,7 @@ fun CategoriesScreen(
                     .clickable { vm.openEdit(cat) }
                     .padding(horizontal = 20.dp, vertical = 14.dp)
                     .drawBehind {
-                        drawLine(c.border,
-                            androidx.compose.ui.geometry.Offset(0f, size.height),
-                            androidx.compose.ui.geometry.Offset(size.width, size.height),
-                            1.dp.toPx())
+                        drawLine(c.border, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
                     }
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -187,140 +184,167 @@ private fun CategoryDialog(
     editTarget: Category?,
     defaultType: CategoryType,
     onDismiss: () -> Unit,
-    onSave: (name: String, type: CategoryType, color: String, budget: Double?) -> Unit
+    onSave: (name: String, type: CategoryType, color: String, budget: Double?) -> Unit,
+    onDelete: (() -> Unit)? = null
 ) {
     val c = MaterialTheme.ledger
     val isEditing = editTarget != null
 
     var name by remember(editTarget) { mutableStateOf(editTarget?.name ?: "") }
     var type by remember(editTarget) { mutableStateOf(editTarget?.type ?: defaultType) }
-    var color by remember(editTarget) { mutableStateOf(editTarget?.color ?: CATEGORY_PRESET_COLORS[0]) }
+    var color by remember(editTarget) { mutableStateOf(editTarget?.color ?: LEDGER_COLOR_PALETTE[0]) }
     var budgetText by remember(editTarget) {
         mutableStateOf(editTarget?.budget?.let { "%.0f".format(it) } ?: "")
     }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
-    AlertDialog(
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            containerColor = c.surface,
+            titleContentColor = c.text,
+            title = { Text("Удалить категорию?", fontFamily = IbmPlexSansFamily, color = c.text) },
+            text = {
+                Text("Операции с этой категорией сохранятся, но потеряют привязку.",
+                    fontFamily = IbmPlexSansFamily, color = c.muted)
+            },
+            confirmButton = {
+                Text("УДАЛИТЬ", fontFamily = IbmPlexMonoFamily, fontSize = 11.sp, color = c.red,
+                    modifier = Modifier.clickable { onDelete?.invoke() }.padding(8.dp))
+            },
+            dismissButton = {
+                Text("ОТМЕНА", fontFamily = IbmPlexMonoFamily, fontSize = 11.sp, color = c.muted,
+                    modifier = Modifier.clickable { showDeleteConfirm = false }.padding(8.dp))
+            }
+        )
+        return
+    }
+
+    Dialog(
         onDismissRequest = onDismiss,
-        containerColor = c.surface,
-        titleContentColor = c.text,
-        title = {
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .background(c.surface)
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
             Text(
                 if (isEditing) "РЕДАКТИРОВАТЬ" else "НОВАЯ КАТЕГОРИЯ",
-                fontFamily = IbmPlexMonoFamily, fontSize = 12.sp, letterSpacing = 1.4.sp
+                fontFamily = IbmPlexMonoFamily, fontSize = 12.sp, letterSpacing = 1.4.sp, color = c.text
             )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
 
-                // Name
+            // Name
+            Column {
+                Text("НАЗВАНИЕ", fontFamily = IbmPlexMonoFamily, fontSize = 9.sp,
+                    letterSpacing = 1.2.sp, color = c.faint)
+                BasicTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    textStyle = TextStyle(fontFamily = IbmPlexMonoFamily, fontSize = 15.sp, color = c.text),
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                        .drawBehind {
+                            drawLine(c.borderStrong,
+                                Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
+                        }
+                        .padding(bottom = 8.dp)
+                )
+            }
+
+            // Type (locked when editing)
+            Column {
+                Text("ТИП", fontFamily = IbmPlexMonoFamily, fontSize = 9.sp,
+                    letterSpacing = 1.2.sp, color = c.faint, modifier = Modifier.padding(bottom = 6.dp))
+                Row(modifier = Modifier.fillMaxWidth().border(1.dp, c.border)) {
+                    listOf(CategoryType.EXPENSE, CategoryType.INCOME).forEach { t ->
+                        val sel = type == t
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(if (sel) c.text else androidx.compose.ui.graphics.Color.Transparent)
+                                .then(if (!isEditing) Modifier.clickable { type = t } else Modifier)
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(t.label, fontFamily = IbmPlexMonoFamily, fontSize = 11.sp,
+                                color = if (sel) c.bg else if (isEditing) c.faint else c.muted)
+                        }
+                    }
+                }
+                if (isEditing) {
+                    Text("Тип нельзя изменить после создания", fontFamily = IbmPlexMonoFamily,
+                        fontSize = 9.sp, color = c.faint, modifier = Modifier.padding(top = 4.dp))
+                }
+            }
+
+            // Color — 64-color scrollable palette
+            Column {
+                Text("ЦВЕТ", fontFamily = IbmPlexMonoFamily, fontSize = 9.sp,
+                    letterSpacing = 1.2.sp, color = c.faint, modifier = Modifier.padding(bottom = 6.dp))
+                ColorPickerRow(selected = color, onSelect = { color = it })
+            }
+
+            // Budget (only for EXPENSE)
+            if (type == CategoryType.EXPENSE) {
                 Column {
-                    Text("НАЗВАНИЕ", fontFamily = IbmPlexMonoFamily, fontSize = 9.sp,
+                    Text("БЮДЖЕТ НА МЕСЯЦ (необязательно)",
+                        fontFamily = IbmPlexMonoFamily, fontSize = 9.sp,
                         letterSpacing = 1.2.sp, color = c.faint)
                     BasicTextField(
-                        value = name,
-                        onValueChange = { name = it },
+                        value = budgetText,
+                        onValueChange = { s -> if (s.all { it.isDigit() }) budgetText = s },
                         textStyle = TextStyle(fontFamily = IbmPlexMonoFamily, fontSize = 15.sp, color = c.text),
                         singleLine = true,
+                        decorationBox = { inner ->
+                            if (budgetText.isEmpty()) {
+                                Text("—", fontFamily = IbmPlexMonoFamily, fontSize = 15.sp, color = c.faint)
+                            }
+                            inner()
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 6.dp)
                             .drawBehind {
                                 drawLine(c.borderStrong,
-                                    androidx.compose.ui.geometry.Offset(0f, size.height),
-                                    androidx.compose.ui.geometry.Offset(size.width, size.height),
-                                    1.dp.toPx())
+                                    Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
                             }
                             .padding(bottom = 8.dp)
                     )
                 }
-
-                // Type — only changeable when creating
-                Column {
-                    Text("ТИП", fontFamily = IbmPlexMonoFamily, fontSize = 9.sp,
-                        letterSpacing = 1.2.sp, color = c.faint, modifier = Modifier.padding(bottom = 6.dp))
-                    Row(modifier = Modifier.fillMaxWidth().border(1.dp, c.border)) {
-                        listOf(CategoryType.EXPENSE, CategoryType.INCOME).forEach { t ->
-                            val sel = type == t
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .background(if (sel) c.text else androidx.compose.ui.graphics.Color.Transparent)
-                                    .then(if (!isEditing) Modifier.clickable { type = t } else Modifier)
-                                    .padding(vertical = 10.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(t.label, fontFamily = IbmPlexMonoFamily, fontSize = 11.sp,
-                                    color = if (sel) c.bg else if (isEditing) c.faint else c.muted)
-                            }
-                        }
-                    }
-                    if (isEditing) {
-                        Text("Тип нельзя изменить после создания", fontFamily = IbmPlexMonoFamily,
-                            fontSize = 9.sp, color = c.faint, modifier = Modifier.padding(top = 4.dp))
-                    }
-                }
-
-                // Color
-                Column {
-                    Text("ЦВЕТ", fontFamily = IbmPlexMonoFamily, fontSize = 9.sp,
-                        letterSpacing = 1.2.sp, color = c.faint, modifier = Modifier.padding(bottom = 6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        CATEGORY_PRESET_COLORS.forEach { hex ->
-                            val sel = color == hex
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .background(parseHexColor(hex))
-                                    .border(2.dp, if (sel) c.text else androidx.compose.ui.graphics.Color.Transparent)
-                                    .clickable { color = hex }
-                            )
-                        }
-                    }
-                }
-
-                // Budget (only for EXPENSE)
-                if (type == CategoryType.EXPENSE) {
-                    Column {
-                        Text("БЮДЖЕТ НА МЕСЯЦ (необязательно)",
-                            fontFamily = IbmPlexMonoFamily, fontSize = 9.sp,
-                            letterSpacing = 1.2.sp, color = c.faint)
-                        BasicTextField(
-                            value = budgetText,
-                            onValueChange = { s -> if (s.all { it.isDigit() }) budgetText = s },
-                            textStyle = TextStyle(fontFamily = IbmPlexMonoFamily, fontSize = 15.sp, color = c.text),
-                            singleLine = true,
-                            decorationBox = { inner ->
-                                if (budgetText.isEmpty()) {
-                                    Text("—", fontFamily = IbmPlexMonoFamily, fontSize = 15.sp, color = c.faint)
-                                }
-                                inner()
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 6.dp)
-                                .drawBehind {
-                                    drawLine(c.borderStrong,
-                                        androidx.compose.ui.geometry.Offset(0f, size.height),
-                                        androidx.compose.ui.geometry.Offset(size.width, size.height),
-                                        1.dp.toPx())
-                                }
-                                .padding(bottom = 8.dp)
-                        )
-                    }
-                }
             }
-        },
-        confirmButton = {
-            Text("СОХРАНИТЬ", fontFamily = IbmPlexMonoFamily, fontSize = 11.sp,
-                letterSpacing = 1.2.sp, color = c.lime,
-                modifier = Modifier.clickable {
-                    val budget = budgetText.toDoubleOrNull()
-                    onSave(name, type, color, budget)
-                }.padding(8.dp))
-        },
-        dismissButton = {
-            Text("ОТМЕНА", fontFamily = IbmPlexMonoFamily, fontSize = 11.sp, color = c.muted,
-                modifier = Modifier.clickable(onClick = onDismiss).padding(8.dp))
+
+            // Delete button (edit mode only)
+            if (isEditing && onDelete != null) {
+                Text(
+                    "УДАЛИТЬ КАТЕГОРИЮ",
+                    fontFamily = IbmPlexMonoFamily, fontSize = 10.sp,
+                    letterSpacing = 1.2.sp, color = c.red,
+                    modifier = Modifier.clickable { showDeleteConfirm = true }.padding(vertical = 4.dp)
+                )
+            }
+
+            // Action buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("ОТМЕНА", fontFamily = IbmPlexMonoFamily, fontSize = 11.sp, color = c.muted,
+                    modifier = Modifier.clickable(onClick = onDismiss).padding(8.dp))
+                Spacer(Modifier.width(16.dp))
+                Text("СОХРАНИТЬ", fontFamily = IbmPlexMonoFamily, fontSize = 11.sp,
+                    letterSpacing = 1.2.sp, color = c.lime,
+                    modifier = Modifier.clickable {
+                        onSave(name, type, color, budgetText.toDoubleOrNull())
+                    }.padding(8.dp))
+            }
         }
-    )
+    }
 }

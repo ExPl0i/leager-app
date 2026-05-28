@@ -7,19 +7,29 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.ledger.app.LedgerApplication
 import com.ledger.app.data.CsvImporter
+import com.ledger.app.domain.model.Transaction
+import com.ledger.app.domain.model.TransactionType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 sealed class ImportStatus {
     object Idle : ImportStatus()
     object Importing : ImportStatus()
-    data class Done(val imported: Int, val skipped: Int) : ImportStatus()
+    data class Done(val imported: Int, val skipped: Int, val errors: List<String> = emptyList()) : ImportStatus()
     data class Error(val message: String) : ImportStatus()
+}
+
+sealed class ExportStatus {
+    object Idle : ExportStatus()
+    object Building : ExportStatus()
+    data class Ready(val csv: String) : ExportStatus()
+    data class Error(val message: String) : ExportStatus()
 }
 
 data class SettingsState(
@@ -30,7 +40,8 @@ data class SettingsState(
     val eurRate: Double = 99.0,
     val netWorthCurrency: String = "RUB",
     val navigateToPinSetup: Boolean = false,
-    val importStatus: ImportStatus = ImportStatus.Idle
+    val importStatus: ImportStatus = ImportStatus.Idle,
+    val exportStatus: ExportStatus = ExportStatus.Idle
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -94,6 +105,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { app.prefsManager.setNetWorthCurrency(currency) }
     }
 
+    // ── Import ───────────────────────────────────────────────────────────────
+
     fun importCsv(uri: Uri) {
         viewModelScope.launch {
             _state.value = _state.value.copy(importStatus = ImportStatus.Importing)
@@ -106,9 +119,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
                 _state.value = _state.value.copy(
-                    importStatus = ImportStatus.Done(result.imported, result.skipped)
+                    importStatus = ImportStatus.Done(result.imported, result.skipped, result.errors)
                 )
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 _state.value = _state.value.copy(
                     importStatus = ImportStatus.Error(e.message ?: "Неизвестная ошибка")
                 )
@@ -116,13 +129,78 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun showImportError(message: String) {
+        _state.value = _state.value.copy(importStatus = ImportStatus.Error(message))
+    }
+
     fun dismissImport() {
         _state.value = _state.value.copy(importStatus = ImportStatus.Idle)
     }
 
+    // ── Export ───────────────────────────────────────────────────────────────
+
+    fun startExport() {
+        if (_state.value.exportStatus is ExportStatus.Building) return
+        _state.value = _state.value.copy(exportStatus = ExportStatus.Building)
+        viewModelScope.launch {
+            try {
+                val csv = withContext(Dispatchers.IO) { buildCsv() }
+                _state.value = _state.value.copy(exportStatus = ExportStatus.Ready(csv))
+            } catch (e: Throwable) {
+                _state.value = _state.value.copy(
+                    exportStatus = ExportStatus.Error(e.message ?: "Ошибка при формировании файла")
+                )
+            }
+        }
+    }
+
+    fun onExportHandled() {
+        _state.value = _state.value.copy(exportStatus = ExportStatus.Idle)
+    }
+
+    fun showExportError(message: String) {
+        _state.value = _state.value.copy(exportStatus = ExportStatus.Error(message))
+    }
+
+    fun dismissExport() {
+        _state.value = _state.value.copy(exportStatus = ExportStatus.Idle)
+    }
+
+    private suspend fun buildCsv(): String {
+        val txns = app.transactionRepo.getAll().first()
+            .sortedWith(compareByDescending<Transaction> { it.date }.thenByDescending { it.time })
+        val accountMap = app.accountRepo.getAllAccounts().first().associateBy { it.id }
+        val categoryMap = app.categoryRepo.getAll().first().associateBy { it.id }
+
+        val sb = StringBuilder()
+        sb.append("uid,date,amount,type,account,to_account,category,note\n")
+
+        txns.forEach { tx ->
+            val accName  = accountMap[tx.accountId]?.name ?: ""
+            val toAcc    = tx.toAccountId?.let { accountMap[it]?.name } ?: ""
+            val catName  = categoryMap[tx.categoryId]?.name ?: ""
+            val typeStr  = when (tx.type) {
+                TransactionType.INCOME   -> "income"
+                TransactionType.EXPENSE  -> "expense"
+                TransactionType.TRANSFER -> "transfer"
+            }
+            val amount = "%.2f".format(Math.abs(tx.amount))
+            sb.append("${esc(tx.id)},${tx.date},${amount},${typeStr},${esc(accName)},${esc(toAcc)},${esc(catName)},${esc(tx.note)}\n")
+        }
+        return sb.toString()
+    }
+
+    private fun esc(v: String): String =
+        if (v.contains(',') || v.contains('"') || v.contains('\n'))
+            "\"${v.replace("\"", "\"\"")}\""
+        else v
+
+    // ── Clear data ───────────────────────────────────────────────────────────
+
     fun clearData() {
         viewModelScope.launch {
             app.transactionRepo.deleteAll()
+            app.accountRepo.resetAllBalances()
         }
     }
 

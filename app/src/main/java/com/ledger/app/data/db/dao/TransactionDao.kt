@@ -80,6 +80,14 @@ interface TransactionDao {
         ORDER BY dateEpochDay ASC
     """)
     suspend fun getDailyExpense(fromDay: Long, toDay: Long): List<DailyTotal>
+
+    @Query("""
+        SELECT categoryId, COALESCE(SUM(amount), 0.0) as total
+        FROM transactions
+        WHERE type = 'INCOME' AND dateEpochDay >= :fromDay AND dateEpochDay <= :toDay
+        GROUP BY categoryId
+    """)
+    suspend fun getIncomeByCategory(fromDay: Long, toDay: Long): List<CategoryTotal>
 }
 
 data class CategoryTotal(val categoryId: String, val total: Double)

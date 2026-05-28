@@ -4,9 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DatePicker
@@ -214,21 +211,31 @@ fun AddTransactionScreen(
             val displayCats = state.categories.filter {
                 it.type == if (state.type == TransactionType.INCOME) CategoryType.INCOME else CategoryType.EXPENSE
             }
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(4),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(((displayCats.size / 4 + 1) * 92).dp.coerceAtMost(184.dp))
-                    .padding(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            val rows = (displayCats.size + 3) / 4
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(displayCats) { cat ->
-                    CategoryCell(
-                        category = cat,
-                        isSelected = cat.id == state.selectedCategory?.id,
-                        onClick = { vm.setCategory(cat) }
-                    )
+                repeat(rows) { row ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        repeat(4) { col ->
+                            val idx = row * 4 + col
+                            if (idx < displayCats.size) {
+                                val cat = displayCats[idx]
+                                CategoryCell(
+                                    category = cat,
+                                    isSelected = cat.id == state.selectedCategory?.id,
+                                    onClick = { vm.setCategory(cat) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            } else {
+                                Spacer(Modifier.weight(1f))
+                            }
+                        }
+                    }
                 }
             }
 
@@ -394,12 +401,12 @@ private fun AccountPicker(
 private fun CategoryCell(
     category: Category,
     isSelected: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val c = MaterialTheme.ledger
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .border(1.dp, if (isSelected) c.text else c.border)
             .background(if (isSelected) c.surface else Color.Transparent)
             .clickable(onClick = onClick)

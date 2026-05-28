@@ -46,6 +46,9 @@ class TransactionRepository(private val dao: TransactionDao) {
     suspend fun getDailyExpense(from: LocalDate, to: LocalDate): List<DailyTotal> =
         dao.getDailyExpense(from.toEpochDay(), to.toEpochDay())
 
+    suspend fun getIncomeByCategory(from: LocalDate, to: LocalDate): List<CategoryTotal> =
+        dao.getIncomeByCategory(from.toEpochDay(), to.toEpochDay())
+
     suspend fun insert(transaction: Transaction) =
         dao.insert(TransactionEntity.fromDomain(transaction))
 
