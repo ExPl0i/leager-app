@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Ledger · SelfFinanceManager · Дизайн-код</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #f0eee9; }
+  * { box-sizing: border-box; }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="application/json" id="tweak-defaults">
+{
+  "theme": "dark"
+}
+</script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="android-frame.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="lib.jsx"></script>
+<script type="text/babel" src="vault.jsx"></script>
+<script type="text/babel" src="ledger-system.jsx"></script>
+
+<script type="text/babel">
+// Ledger — focused canvas with three sections:
+//   1. Дизайн-код (foundations, components, data viz)
+//   2. Экраны (6 phone frames using the system)
+//   3. Видео-материал к концепту (B/C variations live in another file)
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "theme": "dark"
+}/*EDITMODE-END*/;
+
+const W = 412, H = 892;
+
+const Phone = ({ Screen }) => (
+  <AndroidDevice width={W} height={H} dark={window.__theme !== 'light'}>
+    <Screen />
+  </AndroidDevice>
+);
+
+const App = () => {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  window.__theme = t.theme;
+  return (
+    <React.Fragment>
+      <DesignCanvas>
+
+        {/* ═══════════════════════════════════════════ */}
+        <DCSection id="DS"
+          title="Ledger · дизайн-код"
+          subtitle="Терминал-минимализм для финансов: чёткие края, монопространство для чисел, единственный лаймовый акцент. Три листа, на которые опираются все экраны.">
+          <DCArtboard id="DS1" label="01 · Foundations" width={1280} height={1200}>
+            <div key={'DS1'+t.theme} style={{ width: 1280, height: 1200 }}><LedgerFoundations /></div>
+          </DCArtboard>
+          <DCArtboard id="DS2" label="02 · Components" width={1280} height={1500}>
+            <div key={'DS2'+t.theme} style={{ width: 1280, height: 1500 }}><LedgerComponents /></div>
+          </DCArtboard>
+          <DCArtboard id="DS3" label="03 · Data viz" width={1280} height={1380}>
+            <div key={'DS3'+t.theme} style={{ width: 1280, height: 1380 }}><LedgerDataViz /></div>
+          </DCArtboard>
+        </DCSection>
+
+        {/* ═══════════════════════════════════════════ */}
+        <DCSection id="SCR"
+          title="Экраны"
+          subtitle="Шесть основных экранов мобильного приложения. Все построены на токенах и компонентах с листов 01–03. Статистика теперь содержит круговую диаграмму и радиальные кольца KPI.">
+          <DCArtboard id="S1" label="Главный" width={W} height={H}><div key={'S1'+t.theme}><Phone Screen={VaultHome} /></div></DCArtboard>
+          <DCArtboard id="S2" label="Добавить" width={W} height={H}><div key={'S2'+t.theme}><Phone Screen={VaultAdd} /></div></DCArtboard>
+          <DCArtboard id="S3" label="Детали операции" width={W} height={H}><div key={'S3'+t.theme}><Phone Screen={VaultDetail} /></div></DCArtboard>
+          <DCArtboard id="S4" label="Счета" width={W} height={H}><div key={'S4'+t.theme}><Phone Screen={VaultAccounts} /></div></DCArtboard>
+          <DCArtboard id="S5" label="Категории" width={W} height={H}><div key={'S5'+t.theme}><Phone Screen={VaultCats} /></div></DCArtboard>
+          <DCArtboard id="S6" label="Статистика" width={W} height={H}><div key={'S6'+t.theme}><Phone Screen={VaultStats} /></div></DCArtboard>
+        </DCSection>
+
+      </DesignCanvas>
+
+      <TweaksPanel title="Tweaks">
+        <TweakSection label="Тема">
+          <TweakRadio label="Оформление" value={t.theme}
+            options={[{ value: 'dark', label: 'Тёмная' }, { value: 'light', label: 'Светлая' }]}
+            onChange={(v) => setTweak('theme', v)} />
+        </TweakSection>
+        <TweakSection label="Связанные файлы">
+          <div style={{ fontSize: 12, color: '#8a7e6c', lineHeight: 1.6, padding: '4px 0' }}>
+            Концепты B и C перенесены в{' '}
+            <a href="Concept Variations.html" style={{ color: '#c96442', textDecoration: 'underline' }}>Concept Variations.html</a>
+            {' '}— для сравнения с Pulse и Drift.
+          </div>
+        </TweakSection>
+      </TweaksPanel>
+    </React.Fragment>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

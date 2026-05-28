@@ -1,0 +1,56 @@
+# Built artifacts
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Build directories
+build/
+.gradle/
+captures/
+out/
+
+# Local configuration — never commit
+local.properties
+keystore.jks
+*.keystore
+*.jks
+
+# Secrets / environment
+.env
+*.env.*
+google-services.json
+google-play-key.json
+
+# Android Studio
+.idea/
+*.iml
+*.iws
+*.ipr
+.DS_Store
+Thumbs.db
+
+# Navigation editor — regenerated
+app/src/main/res/navigation/
+
+# Profiling / test output
+*.hprof
+*/build/reports/
+lint-results*.html
+lint-results*.xml
+
+# Kotlin incremental compilation cache
+**/kotlin-incremental/
+
+# Gradle wrapper — keep the jar, ignore the cache
+!gradle/wrapper/gradle-wrapper.jar
+.gradle/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini

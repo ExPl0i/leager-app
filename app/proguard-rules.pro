@@ -1,0 +1,4 @@
+-keepattributes *Annotation*
+-keepclassmembers class * extends androidx.room.RoomDatabase { abstract *; }
+-keep class com.ledger.app.data.db.entity.** { *; }
+-dontwarn kotlinx.coroutines.**
