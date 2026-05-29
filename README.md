@@ -263,7 +263,7 @@ Room database version: **2**. `fallbackToDestructiveMigration()` is enabled — 
 ```
 MIT License
 
-Copyright (c) 2026 <your name>
+Copyright (c) 2026 Expl0i
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
