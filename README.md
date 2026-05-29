@@ -24,6 +24,19 @@ A minimalist personal finance app for Android, built with Jetpack Compose. Track
 
 ---
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/home.png" width="200" alt="Home"/><br/><sub>Home</sub></td>
+    <td align="center"><img src="docs/screenshots/add.png" width="200" alt="Add transaction"/><br/><sub>Add transaction</sub></td>
+    <td align="center"><img src="docs/screenshots/stats.png" width="200" alt="Statistics"/><br/><sub>Statistics</sub></td>
+    <td align="center"><img src="docs/screenshots/settings.png" width="200" alt="Settings"/><br/><sub>Settings</sub></td>
+  </tr>
+</table>
+
+---
+
 ## CSV Format
 
 The app imports and exports a UTF-8 CSV with the following columns:
